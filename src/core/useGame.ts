@@ -1,5 +1,24 @@
-import { ref } from 'vue'
+import { ref, Ref } from 'vue'
 import { ceil, floor, random, shuffle } from 'lodash-es'
+
+// 更新 Game 接口定义，添加新的属性
+interface Game {
+  nodes: Ref<CardNode[]>
+  selectedNodes: Ref<CardNode[]>
+  removeFlag: Ref<boolean>
+  removeList: Ref<CardNode[]>
+  backFlag: Ref<boolean>
+  handleSelect: (node: CardNode) => void
+  handleBack: () => void
+  handleRemove: () => void
+  handleSelectRemove: (node: CardNode) => void
+  initData: (config?: GameConfig | null) => void
+  backCount: Ref<number>      // 当前撤销次数
+  removeCount: Ref<number>    // 当前移除次数
+  maxBackCount: number        // 最大撤销次数限制
+  maxRemoveCount: number      // 最大移除次数限制
+}
+
 const defaultGameConfig: GameConfig = {
   cardNum: 4,
   layerNum: 2,
@@ -12,7 +31,8 @@ export function useGame(config: GameConfig): Game {
   const histroyList = ref<CardNode[]>([])
   const backFlag = ref(false)
   const removeFlag = ref(false)
-  const removeList = ref<CardNode[]>([])
+  const removeList = ref<CardNode[]>([])  // 当前显示的移出区域牌组
+  const removedSets = ref<CardNode[][]>([])  // 存储所有已移出的牌组
   const preNode = ref<CardNode | null>(null)
   const nodes = ref<CardNode[]>([])
   const indexSet = new Set()
@@ -20,6 +40,12 @@ export function useGame(config: GameConfig): Game {
   const selectedNodes = ref<CardNode[]>([])
   const size = 40
   let floorList: number[][] = []
+  
+  // 添加撤销和移除次数的计数器
+  const backCount = ref(0)
+  const removeCount = ref(0)
+  const maxBackCount = 1  // 最大撤销次数
+  const maxRemoveCount = 2  // 最大移除次数
 
   function updateState() {
     nodes.value.forEach((o) => {
@@ -37,20 +63,15 @@ export function useGame(config: GameConfig): Game {
     if (index > -1)
       delNode && nodes.value.splice(index, 1)
 
-    // 判断是否有可以消除的节点
     const selectedSomeNode = selectedNodes.value.filter(s => s.type === node.type)
     if (selectedSomeNode.length === 2) {
-      // 第二个节点索引
       const secondIndex = selectedNodes.value.findIndex(o => o.id === selectedSomeNode[1].id)
       selectedNodes.value.splice(secondIndex + 1, 0, node)
-      // 为了动画效果添加延迟
       setTimeout(() => {
         for (let i = 0; i < 3; i++) {
-          // const index = selectedNodes.value.findIndex(o => o.type === node.type)
           selectedNodes.value.splice(secondIndex - 1, 1)
         }
         preNode.value = null
-        // 判断是否已经清空节点，即是否胜利
         if (delNode ? nodes.value.length === 0 : nodes.value.every(o => o.state > 0) && removeList.value.length === 0 && selectedNodes.value.length === 0) {
           removeFlag.value = true
           backFlag.value = true
@@ -68,7 +89,11 @@ export function useGame(config: GameConfig): Game {
         selectedNodes.value.splice(index + 1, 0, node)
       else
         selectedNodes.value.push(node)
-      // 判断卡槽是否已满，即失败
+      
+      // 更新按钮状态
+      removeFlag.value = !(selectedNodes.value.length >= 3 && removeCount.value < maxRemoveCount)
+      backFlag.value = !(preNode.value && backCount.value < maxBackCount)
+
       if (selectedNodes.value.length === 7) {
         removeFlag.value = true
         backFlag.value = true
@@ -78,18 +103,72 @@ export function useGame(config: GameConfig): Game {
   }
 
   function handleSelectRemove(node: CardNode) {
-    const index = removeList.value.findIndex(o => o.id === node.id)
-    if (index > -1)
-      removeList.value.splice(index, 1)
-    handleSelect(node)
+    // node is the card clicked in the removeList (e.g., B1)
+    // Ensure necessary properties exist
+    if (node.setIndex === undefined || node.positionInSet === undefined) {
+        console.error("Clicked card in removeList lacks setIndex or positionInSet:", node);
+        return;
+    }
+
+    const currentSetIndex = node.setIndex;
+    const currentPosition = node.positionInSet;
+
+    // Find the index of the clicked node in the currently displayed list
+    const displayIndex = removeList.value.findIndex(o => o.id === node.id);
+    if (displayIndex === -1) {
+        console.error("Clicked card not found in removeList:", node);
+        return; // Card not found in the display list, should not happen
+    }
+
+    // Temporarily remove the clicked node (B1) from the display list
+    removeList.value.splice(displayIndex, 1);
+
+    // Find the corresponding card from the previous set in history (e.g., A1)
+    const prevSetIndex = currentSetIndex - 1;
+    if (prevSetIndex >= 0) {
+        const prevSet = removedSets.value[prevSetIndex];
+        // Check if the previous set and the card at the specific position exist
+        if (prevSet && prevSet[currentPosition]) {
+            const cardFromHistory = prevSet[currentPosition];
+
+            // Create a completely new object to ensure reactivity updates
+            // This new object represents the card being restored (A1)
+            const cardToDisplay = {
+                ...cardFromHistory, // Copy all properties from the historical card
+                setIndex: prevSetIndex, // Assign the correct historical set index
+                positionInSet: currentPosition, // Maintain the correct position within the set
+                state: 1 // *** CRITICAL: Ensure the restored card is clickable ***
+            };
+
+            // Insert the restored card (A1) into the display list at the correct logical position
+            // Use currentPosition (0, 1, or 2) for insertion index
+            removeList.value.splice(currentPosition, 0, cardToDisplay);
+        } else {
+             console.warn(`No card found in previous set (index ${prevSetIndex}) at position ${currentPosition}`);
+        }
+    } else {
+        // This was the first set removed, so the slot remains empty after removing 'node'
+    }
+
+    // Now, process the card that was originally clicked (node = B1)
+    // Pass the original 'node' object to handleSelect.
+    // handleSelect will set its state to 2 (selected) and move it.
+    // No need to set state: 1 here as handleSelect handles its state.
+    handleSelect(node);
   }
 
   function handleBack() {
+    if (backCount.value >= maxBackCount) {
+      return
+    }
+
     const node = preNode.value
     if (!node)
       return
+    
+    backCount.value++
     preNode.value = null
-    backFlag.value = true
+    backFlag.value = true  // 使用后禁用
     node.state = 0
     delNode && nodes.value.push(node)
     const index = selectedNodes.value.findIndex(o => o.id === node.id)
@@ -97,62 +176,137 @@ export function useGame(config: GameConfig): Game {
   }
 
   function handleRemove() {
-  // 从selectedNodes.value中取出3个 到 removeList.value中
-
-    if (selectedNodes.value.length < 3)
+    if (removeCount.value >= maxRemoveCount || selectedNodes.value.length < 3) {
       return
-    removeFlag.value = true
-    preNode.value = null
-    for (let i = 0; i < 3; i++) {
-      const node = selectedNodes.value.shift()
-      if (!node)
-        return
-      removeList.value.push(node)
     }
+
+    removeCount.value++
+    removeFlag.value = !(selectedNodes.value.length >= 3 && removeCount.value < maxRemoveCount)
+    // We don't reset preNode here as it relates to 'handleBack' functionality
+
+    const currentSetIndex = removedSets.value.length;
+    const newSet: CardNode[] = [] // This will hold cards for historical record
+    const displaySet: CardNode[] = [] // This will hold cards for the reactive removeList
+
+    for (let i = 0; i < 3; i++) {
+      const nodeFromSelection = selectedNodes.value.shift() // Get card from selection tray
+      if (!nodeFromSelection) break
+
+      // Create a new object for the historical set (removedSets)
+      const nodeForHistory = {
+        ...nodeFromSelection, // Copy properties
+        setIndex: currentSetIndex,
+        positionInSet: i,
+        state: 1 // Ensure state is 1 for storage
+      }
+      newSet.push(nodeForHistory);
+
+      // Create another distinct new object for the display list (removeList)
+      // This ensures removeList gets fresh objects, potentially helping reactivity
+       const nodeForDisplay = {
+        ...nodeForHistory // Copy from the already processed history node
+      };
+      displaySet.push(nodeForDisplay);
+
+      // Optional: Reset state of the original node in selectedNodes if needed?
+      // nodeFromSelection.state = 0; // Or some other state? - Let's avoid this for now.
+    }
+
+    // Store the historical set
+    if (newSet.length > 0) {
+       removedSets.value.push(newSet);
+    }
+
+    // Update the reactive display list with completely new objects
+    if (displaySet.length > 0) {
+        removeList.value = displaySet; // Assign the array of new objects
+    } else {
+        removeList.value = []; // Clear list if no nodes were removed
+    }
+
+     // Update button states based on the new counts and list lengths
+     removeFlag.value = !(selectedNodes.value.length >= 3 && removeCount.value < maxRemoveCount);
+     // backFlag logic depends on preNode, which wasn't changed here.
   }
 
   function initData(config?: GameConfig | null) {
     const { cardNum, layerNum, trap } = { ...initConfig, ...config }
     histroyList.value = []
-    backFlag.value = false
-    removeFlag.value = false
+    backFlag.value = true  // 初始时禁用
+    removeFlag.value = true  // 初始时禁用
     removeList.value = []
+    removedSets.value = []  // 重置所有移出的牌组
     preNode.value = null
     nodes.value = []
     indexSet.clear()
     perFloorNodes = []
     selectedNodes.value = []
     floorList = []
+    backCount.value = 0
+    removeCount.value = 0
     const isTrap = trap && floor(random(0, 100)) !== 50
 
-    // 生成节点池
     const itemTypes = (new Array(cardNum).fill(0)).map((_, index) => index + 1)
     let itemList: number[] = []
-    for (let i = 0; i < 3 * layerNum; i++)
+    for (let i = 0; i < 15; i++) {
       itemList = [...itemList, ...itemTypes]
-
-    if (isTrap) {
-      const len = itemList.length
-      itemList.splice(len - cardNum, len)
     }
-    // 打乱节点
     itemList = shuffle(shuffle(itemList))
 
-    // 初始化各个层级节点
+    const centerCards = itemList.slice(0, 240)
+    const leftStackCards = itemList.slice(240, 255)
+    const rightStackCards = itemList.slice(255, 270)
+
     let len = 0
     let floorIndex = 1
-    const itemLength = itemList.length
+    const itemLength = centerCards.length
     while (len <= itemLength) {
       const maxFloorNum = floorIndex * floorIndex
       const floorNum = ceil(random(maxFloorNum / 2, maxFloorNum))
-      floorList.push(itemList.splice(0, floorNum))
+      floorList.push(centerCards.splice(0, floorNum))
       len += floorNum
       floorIndex++
     }
+
     const containerWidth = container.value!.clientWidth
     const containerHeight = container.value!.clientHeight
     const width = containerWidth / 2
-    const height = containerHeight / 2 - 60
+    const height = containerHeight / 2 + 100
+
+    const stackSize = 15
+    const stackSpacing = 2
+    
+    for (let i = 0; i < stackSize; i++) {
+      const node: CardNode = {
+        id: `stack-left-${i}`,
+        type: leftStackCards[i],
+        zIndex: i,
+        index: i,
+        row: 0,
+        column: 0,
+        top: height,
+        left: 50 + (i * stackSpacing),
+        parents: [],
+        state: 1,
+      }
+      nodes.value.push(node)
+    }
+
+    for (let i = 0; i < stackSize; i++) {
+      const node: CardNode = {
+        id: `stack-right-${i}`,
+        type: rightStackCards[i],
+        zIndex: i,
+        index: i,
+        row: 0,
+        column: 0,
+        top: height,
+        left: containerWidth - 90 + (i * stackSpacing),
+        parents: [],
+        state: 1,
+      }
+      nodes.value.push(node)
+    }
 
     floorList.forEach((o, index) => {
       indexSet.clear()
@@ -167,8 +321,7 @@ export function useGame(config: GameConfig): Game {
         const node: CardNode = {
           id: `${index}-${i}`,
           type: k,
-          zIndex:
-        index,
+          zIndex: index,
           index: i,
           row,
           column,
@@ -203,5 +356,9 @@ export function useGame(config: GameConfig): Game {
     handleRemove,
     handleSelectRemove,
     initData,
+    backCount,
+    removeCount,
+    maxBackCount,
+    maxRemoveCount,
   }
 }

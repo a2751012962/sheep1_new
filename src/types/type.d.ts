@@ -38,4 +38,6 @@ type CardNode = {
   top: number
   left: number
   state: number        // 是否可点击 0： 无状态  1： 可点击 2：已选 3：已消除
+  setIndex?: number    // 移出时所在的牌组索引
+  positionInSet?: number  // 移出时在牌组中的位置
 }

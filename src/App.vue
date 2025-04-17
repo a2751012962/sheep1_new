@@ -10,12 +10,10 @@ const dropAudioRef = ref<HTMLAudioElement | undefined>()
 const winAudioRef = ref<HTMLAudioElement | undefined>()
 const loseAudioRef = ref<HTMLAudioElement | undefined>()
 const welAudioRef = ref<HTMLAudioElement | undefined>()
-const curLevel = ref(1)
+const curLevel = ref(0)
 const showTip = ref(false)
 const LevelConfig = [
-  { cardNum: 4, layerNum: 2, trap: false },
-  { cardNum: 9, layerNum: 3, trap: false },
-  { cardNum: 15, layerNum: 6, trap: false },
+  { cardNum: 18, layerNum: 15, trap: false },
 ]
 
 const isWin = ref(false)
@@ -31,10 +29,14 @@ const {
   removeList,
   handleSelectRemove,
   initData,
+  backCount,
+  removeCount,
+  maxBackCount,
+  maxRemoveCount,
 } = useGame({
   container: containerRef,
-  cardNum: 4,
-  layerNum: 2,
+  cardNum: 18,
+  layerNum: 15,
   trap: false,
   events: {
     clickCallback: handleClickCard,
@@ -135,7 +137,7 @@ onMounted(() => {
 
     <div text-center h-50px flex items-center justify-center>
       <Card
-        v-for="item in removeList" :key="item.id" :node="item"
+        v-for="item in removeList.slice(-3)" :key="item.id" :node="item"
         is-dock
         @click-card="handleSelectRemove"
       />
@@ -156,10 +158,10 @@ onMounted(() => {
 
     <div h-50px flex items-center w-full justify-center>
       <button :disabled="removeFlag" mr-10px @click="handleRemove">
-        移出前三个
+        移出前三个 ({{ maxRemoveCount - removeCount }})
       </button>
       <button :disabled="backFlag" @click="handleBack">
-        回退
+        回退 ({{ maxBackCount - backCount }})
       </button>
     </div>
     <div w-full color="#000" fw-600 text-center pb-10px>

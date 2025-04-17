@@ -9,11 +9,13 @@ export function fireworks() {
     return Math.random() * (max - min) + min
   }
 
-  const interval: NodeJS.Timer = setInterval(() => {
+  const interval = setInterval(() => {
     const timeLeft = animationEnd - Date.now()
 
-    if (timeLeft <= 0)
-      return clearInterval(interval)
+    if (timeLeft <= 0) {
+      clearInterval(interval)
+      return
+    }
 
     const particleCount = 50 * (timeLeft / duration)
     // since particles fall down, start a bit higher than random
