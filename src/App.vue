@@ -28,6 +28,7 @@ const {
   removeFlag,
   removeList,
   handleSelectRemove,
+  handleShuffle,
   initData,
   backCount,
   removeCount,
@@ -160,8 +161,11 @@ onMounted(() => {
       <button :disabled="removeFlag" mr-10px @click="handleRemove">
         移出前三个 ({{ maxRemoveCount - removeCount }})
       </button>
-      <button :disabled="backFlag" @click="handleBack">
+      <button :disabled="backFlag" mr-10px @click="handleBack">
         回退 ({{ maxBackCount - backCount }})
+      </button>
+      <button @click="handleShuffle">
+        洗牌
       </button>
     </div>
     <div w-full color="#000" fw-600 text-center pb-10px>

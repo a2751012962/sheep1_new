@@ -12,6 +12,7 @@ interface Game {
   handleBack: () => void
   handleRemove: () => void
   handleSelectRemove: (node: CardNode) => void
+  handleShuffle: () => void  // 添加洗牌方法
   initData: (config?: GameConfig | null) => void
   backCount: Ref<number>      // 当前撤销次数
   removeCount: Ref<number>    // 当前移除次数
@@ -48,8 +49,16 @@ export function useGame(config: GameConfig): Game {
   const maxRemoveCount = 2  // 最大移除次数
 
   function updateState() {
+    // Create a Set of IDs currently in the hand for efficient lookup
+    const selectedIds = new Set(selectedNodes.value.map(node => node.id));
+
     nodes.value.forEach((o) => {
-      o.state = o.parents.every(p => p.state > 0) ? 1 : 0
+      // IMPORTANT: Only update state if the card is NOT currently in the hand (state 2)
+      if (!selectedIds.has(o.id)) {
+         // If not in hand, determine state based on parents
+         o.state = o.parents.every(p => p.state > 0) ? 1 : 0
+      } 
+      // else: If it IS in the hand (selectedIds.has(o.id)), do nothing - preserve its state (which should be 2)
     })
   }
 
@@ -229,6 +238,83 @@ export function useGame(config: GameConfig): Game {
      // backFlag logic depends on preNode, which wasn't changed here.
   }
 
+  function handleShuffle() {
+    console.log("--- Shuffle Start ---");
+    console.log("Hand cards BEFORE shuffle:", JSON.parse(JSON.stringify(selectedNodes.value.map(n => ({ id: n.id, type: n.type })))));
+
+    // --- Gather cards for shuffling (excluding hand) --- 
+    const availableNodes = nodes.value.filter(node => [0, 1].includes(node.state));
+    // const handNodes = selectedNodes.value; // Explicitly EXCLUDE hand nodes
+    const removedNodes = removeList.value;
+    
+    // Combine cards whose types will be shuffled together (available + removed)
+    const cardsToShuffleType = [
+      ...availableNodes, 
+      // ...handNodes, // DO NOT INCLUDE HAND NODES
+      ...removedNodes
+    ];
+
+    if (cardsToShuffleType.length < 2) {
+      console.log("Not enough other cards to shuffle.");
+      console.log("--- Shuffle End (No Action) ---");
+      // Nothing to shuffle if less than 2 cards involved (excluding hand)
+      return; 
+    }
+
+    // --- Shuffle types for available & removed cards --- 
+    const typesToShuffle = cardsToShuffleType.map(card => card.type);
+    const shuffledTypes = shuffle([...typesToShuffle]);
+
+    // --- Redistribute shuffled types ONLY to available & removed cards --- 
+    cardsToShuffleType.forEach((card, index) => {
+      card.type = shuffledTypes[index];
+    });
+
+    // --- Separately handle position shuffle for MAIN AREA cards (subset of availableNodes) ---
+    // Note: Main area cards already got their new types from the step above
+    const mainAreaCards = availableNodes.filter(node => !node.id.startsWith('stack-'))
+    if (mainAreaCards.length > 0) {
+      // Record original positions
+      const originalPositions = mainAreaCards.map(card => ({
+        top: card.top, left: card.left, zIndex: card.zIndex,
+        row: card.row, column: card.column
+      }));
+      const shuffledPositions = shuffle([...originalPositions]);
+
+      // Assign new positions
+      mainAreaCards.forEach((card, index) => {
+        const newPos = shuffledPositions[index];
+        card.top = newPos.top; card.left = newPos.left; card.zIndex = newPos.zIndex;
+        card.row = newPos.row; card.column = newPos.column;
+      });
+
+      // Update parent relationships for main area cards
+      mainAreaCards.forEach(card => { card.parents = [] })
+      mainAreaCards.forEach((card, i) => {
+        mainAreaCards.forEach((otherCard, j) => {
+          if (i !== j) {
+            if (Math.abs(card.top - otherCard.top) <= size &&
+                Math.abs(card.left - otherCard.left) <= size &&
+                card.zIndex > otherCard.zIndex) {
+              otherCard.parents.push(card)
+            }
+          }
+        })
+      })
+      
+      // Update states for all available nodes (State 0/1) based on new parent relationships
+      updateState()
+    } 
+    else if (availableNodes.length > 0 && mainAreaCards.length === 0) {
+        // If only stack cards were shuffled (type only), still call updateState
+        updateState();
+    }
+
+    // Hand nodes (selectedNodes) were explicitly excluded and remain unchanged.
+    console.log("Hand cards AFTER shuffle logic:", JSON.parse(JSON.stringify(selectedNodes.value.map(n => ({ id: n.id, type: n.type })))));
+    console.log("--- Shuffle End ---");
+  }
+
   function initData(config?: GameConfig | null) {
     const { cardNum, layerNum, trap } = { ...initConfig, ...config }
     histroyList.value = []
@@ -244,6 +330,7 @@ export function useGame(config: GameConfig): Game {
     floorList = []
     backCount.value = 0
     removeCount.value = 0
+
     const isTrap = trap && floor(random(0, 100)) !== 50
 
     const itemTypes = (new Array(cardNum).fill(0)).map((_, index) => index + 1)
@@ -355,6 +442,7 @@ export function useGame(config: GameConfig): Game {
     handleBack,
     handleRemove,
     handleSelectRemove,
+    handleShuffle,
     initData,
     backCount,
     removeCount,
