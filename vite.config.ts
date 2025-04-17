@@ -4,7 +4,7 @@ import Unocss from 'unocss/vite'
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  base: './',  // 修改为相对路径
+  base: '/sheep1_new/',  // 使用仓库名作为base
   plugins: [
     vue(),
     Unocss(),
