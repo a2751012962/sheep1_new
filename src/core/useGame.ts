@@ -50,15 +50,19 @@ export function useGame(config: GameConfig): Game {
 
   function updateState() {
     // Create a Set of IDs currently in the hand for efficient lookup
-    const selectedIds = new Set(selectedNodes.value.map(node => node.id));
+    // const selectedIds = new Set(selectedNodes.value.map(node => node.id)); // 不再需要 selectedIds
 
     nodes.value.forEach((o) => {
-      // IMPORTANT: Only update state if the card is NOT currently in the hand (state 2)
-      if (!selectedIds.has(o.id)) {
-         // If not in hand, determine state based on parents
-         o.state = o.parents.every(p => p.state > 0) ? 1 : 0
-      } 
-      // else: If it IS in the hand (selectedIds.has(o.id)), do nothing - preserve its state (which should be 2)
+      // --- 开始修改 ---
+      // 只更新状态为 0 (覆盖) 或 1 (可点击) 的牌
+      // 跳过状态为 2 (手牌区) 或 3 (已消除) 的牌
+      if (o.state === 0 || o.state === 1) {
+         // 基于父牌状态决定当前牌是 0 (覆盖) 还是 1 (可点击)
+         // 如果所有父牌都已移除 (state > 1)，则当前牌可点击 (state = 1)
+         o.state = o.parents.every(p => p.state > 1) ? 1 : 0;
+      }
+      // 对于 state 2 和 3 的牌，保持它们的状态不变
+      // --- 结束修改 ---
     })
   }
 
@@ -76,10 +80,25 @@ export function useGame(config: GameConfig): Game {
     if (selectedSomeNode.length === 2) {
       const secondIndex = selectedNodes.value.findIndex(o => o.id === selectedSomeNode[1].id)
       selectedNodes.value.splice(secondIndex + 1, 0, node)
+
+      // 获取即将被消除的 3 张牌的 ID
+      const eliminatedIds = [
+          selectedNodes.value[secondIndex - 1].id, // 第一张
+          selectedNodes.value[secondIndex].id,     // 第二张 (刚插入的 node 的前一张)
+          node.id                                // 第三张 (刚插入的 node)
+      ];
+
       setTimeout(() => {
-        for (let i = 0; i < 3; i++) {
-          selectedNodes.value.splice(secondIndex - 1, 1)
-        }
+        // 从手牌区移除
+        selectedNodes.value.splice(secondIndex - 1, 3)
+
+        // 在主列表中标记为已消除 (state = 3)
+        nodes.value.forEach(n => {
+          if (eliminatedIds.includes(n.id)) {
+            n.state = 3; // 标记为已消除
+          }
+        });
+
         preNode.value = null
         if (delNode ? nodes.value.length === 0 : nodes.value.every(o => o.state > 0) && removeList.value.length === 0 && selectedNodes.value.length === 0) {
           removeFlag.value = true
@@ -240,78 +259,72 @@ export function useGame(config: GameConfig): Game {
 
   function handleShuffle() {
     console.log("--- Shuffle Start ---");
-    console.log("Hand cards BEFORE shuffle:", JSON.parse(JSON.stringify(selectedNodes.value.map(n => ({ id: n.id, type: n.type })))));
 
-    // --- Gather cards for shuffling (excluding hand) --- 
-    const availableNodes = nodes.value.filter(node => [0, 1].includes(node.state));
-    // const handNodes = selectedNodes.value; // Explicitly EXCLUDE hand nodes
-    const removedNodes = removeList.value;
-    
-    // Combine cards whose types will be shuffled together (available + removed)
-    const cardsToShuffleType = [
-      ...availableNodes, 
-      // ...handNodes, // DO NOT INCLUDE HAND NODES
-      ...removedNodes
-    ];
+    // 1. 识别洗牌候选卡牌 (排除手牌, 移出区)
+    const handIds = new Set(selectedNodes.value.map(n => n.id));
+    const removeIds = new Set(removeList.value.map(n => n.id));
 
-    if (cardsToShuffleType.length < 2) {
-      console.log("Not enough other cards to shuffle.");
-      console.log("--- Shuffle End (No Action) ---");
-      // Nothing to shuffle if less than 2 cards involved (excluding hand)
-      return; 
+    const shuffleCandidates = nodes.value.filter(node =>
+      !handIds.has(node.id) &&             // 不在手牌区
+      !removeIds.has(node.id) &&          // 不在移出区 (当前显示的)
+      (node.state === 0 || node.state === 1)  // 在场上 (被覆盖或可点击)
+    );
+
+    if (shuffleCandidates.length <= 1) {
+      console.log("Not enough cards to shuffle.");
+      return; // 不需要洗牌
     }
 
-    // --- Shuffle types for available & removed cards --- 
-    const typesToShuffle = cardsToShuffleType.map(card => card.type);
-    const shuffledTypes = shuffle([...typesToShuffle]);
+    console.log(`Shuffling ${shuffleCandidates.length} cards.`);
 
-    // --- Redistribute shuffled types ONLY to available & removed cards --- 
-    cardsToShuffleType.forEach((card, index) => {
-      card.type = shuffledTypes[index];
+    // 2. 提取这些卡牌的当前位置信息
+    const positions = shuffleCandidates.map(node => ({
+      top: node.top,
+      left: node.left,
+      zIndex: node.zIndex,
+      // 保留 row/column 也许有用，但暂时不洗牌它们
+    }));
+
+    // 3. 洗牌位置信息 (只洗 top, left, zIndex)
+    const shuffledPositions = shuffle(positions);
+
+    // 4. 将洗牌后的位置重新分配给候选卡牌
+    shuffleCandidates.forEach((node, index) => {
+      node.top = shuffledPositions[index].top;
+      node.left = shuffledPositions[index].left;
+      node.zIndex = shuffledPositions[index].zIndex;
     });
 
-    // --- Separately handle position shuffle for MAIN AREA cards (subset of availableNodes) ---
-    // Note: Main area cards already got their new types from the step above
-    const mainAreaCards = availableNodes.filter(node => !node.id.startsWith('stack-'))
-    if (mainAreaCards.length > 0) {
-      // Record original positions
-      const originalPositions = mainAreaCards.map(card => ({
-        top: card.top, left: card.left, zIndex: card.zIndex,
-        row: card.row, column: card.column
-      }));
-      const shuffledPositions = shuffle([...originalPositions]);
+    // 5. 重新计算所有卡牌的父子关系
+    console.log("Recalculating parent relationships...");
+    nodes.value.forEach(node => { node.parents = [] }); // 清空所有父关系
 
-      // Assign new positions
-      mainAreaCards.forEach((card, index) => {
-        const newPos = shuffledPositions[index];
-        card.top = newPos.top; card.left = newPos.left; card.zIndex = newPos.zIndex;
-        card.row = newPos.row; card.column = newPos.column;
+    const cardSize = size; // 使用已定义的 size 变量
+
+    // O(n^2) 检查，对于几百张牌可以接受
+    nodes.value.forEach((potentialChild) => {
+      // 跳过已在手牌区的牌，它们不应再有父牌
+      if (handIds.has(potentialChild.id)) return;
+
+      nodes.value.forEach((potentialParent) => {
+        // 跳过检查自身，或检查已在手牌区的牌作为父牌
+        if (potentialChild.id === potentialParent.id || handIds.has(potentialParent.id)) return;
+
+        // 检查重叠和 Z 轴关系 (potentialParent 在 potentialChild 上方)
+        if (
+          Math.abs(potentialParent.top - potentialChild.top) < cardSize &&
+          Math.abs(potentialParent.left - potentialChild.left) < cardSize &&
+          potentialParent.zIndex > potentialChild.zIndex // 父牌 zIndex 更大 (更靠上)
+        ) {
+          potentialChild.parents.push(potentialParent);
+        }
       });
+    });
+    console.log("Parent relationships recalculated.");
 
-      // Update parent relationships for main area cards
-      mainAreaCards.forEach(card => { card.parents = [] })
-      mainAreaCards.forEach((card, i) => {
-        mainAreaCards.forEach((otherCard, j) => {
-          if (i !== j) {
-            if (Math.abs(card.top - otherCard.top) <= size &&
-                Math.abs(card.left - otherCard.left) <= size &&
-                card.zIndex > otherCard.zIndex) {
-              otherCard.parents.push(card)
-            }
-          }
-        })
-      })
-      
-      // Update states for all available nodes (State 0/1) based on new parent relationships
-      updateState()
-    } 
-    else if (availableNodes.length > 0 && mainAreaCards.length === 0) {
-        // If only stack cards were shuffled (type only), still call updateState
-        updateState();
-    }
+    // 6. 基于新的父子关系更新卡牌状态 (哪些变成可点击)
+    updateState();
 
-    // Hand nodes (selectedNodes) were explicitly excluded and remain unchanged.
-    console.log("Hand cards AFTER shuffle logic:", JSON.parse(JSON.stringify(selectedNodes.value.map(n => ({ id: n.id, type: n.type })))));
     console.log("--- Shuffle End ---");
   }
 
@@ -428,6 +441,24 @@ export function useGame(config: GameConfig): Game {
       nodes.value = nodes.value.concat(floorNodes)
       perFloorNodes = floorNodes
     })
+
+    // --- 开始添加: 计算库存牌的父子关系 ---
+    console.log("Calculating parent relationships for stacks...");
+    const leftStack = nodes.value.filter(n => n.id.startsWith('stack-left-')).sort((a, b) => a.zIndex - b.zIndex);
+    const rightStack = nodes.value.filter(n => n.id.startsWith('stack-right-')).sort((a, b) => a.zIndex - b.zIndex);
+
+    [leftStack, rightStack].forEach(stack => {
+      for (let i = 0; i < stack.length - 1; i++) {
+        const child = stack[i];
+        const parent = stack[i + 1]; // 叠在它上面的那张牌
+        if (parent) {
+           child.parents.push(parent);
+        }
+      }
+      // 最顶部的牌 (stack[stack.length - 1]) 会自然地没有父牌
+    });
+    console.log("Stack parent relationships calculated.");
+    // --- 结束添加 ---
 
     updateState()
   }
