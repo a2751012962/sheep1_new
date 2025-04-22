@@ -16,8 +16,11 @@ interface Game {
   initData: (config?: GameConfig | null) => void
   backCount: Ref<number>      // 当前撤销次数
   removeCount: Ref<number>    // 当前移除次数
+  shuffleCount: Ref<number>    // 添加洗牌次数计数器
   maxBackCount: number        // 最大撤销次数限制
   maxRemoveCount: number      // 最大移除次数限制
+  maxShuffleCount: number      // 添加最大洗牌次数限制
+  shuffleFlag: Ref<boolean>    // 添加洗牌按钮状态
 }
 
 const defaultGameConfig: GameConfig = {
@@ -47,6 +50,9 @@ export function useGame(config: GameConfig): Game {
   const removeCount = ref(0)
   const maxBackCount = 1  // 最大撤销次数
   const maxRemoveCount = 2  // 最大移除次数
+  const shuffleCount = ref(0)        // 初始化洗牌次数计数器
+  const shuffleFlag = ref(false)     // 初始化洗牌按钮状态
+  const maxShuffleCount = 1          // 设置最大洗牌次数为 1
 
   function updateState() {
     // Create a Set of IDs currently in the hand for efficient lookup
@@ -258,6 +264,12 @@ export function useGame(config: GameConfig): Game {
   }
 
   function handleShuffle() {
+    // 检查是否已达到洗牌次数限制
+    if (shuffleCount.value >= maxShuffleCount) {
+      console.log("No more shuffles available.");
+      return;
+    }
+
     console.log("--- Shuffle Start ---");
 
     // 1. 识别洗牌候选卡牌 (排除手牌, 移出区)
@@ -272,10 +284,15 @@ export function useGame(config: GameConfig): Game {
 
     if (shuffleCandidates.length <= 1) {
       console.log("Not enough cards to shuffle.");
-      return; // 不需要洗牌
+      return;
     }
 
-    console.log(`Shuffling ${shuffleCandidates.length} cards.`);
+    // 增加洗牌次数计数
+    shuffleCount.value++;
+    // 禁用洗牌按钮
+    shuffleFlag.value = true;
+
+    console.log(`Shuffling ${shuffleCandidates.length} cards. Remaining shuffles: ${maxShuffleCount - shuffleCount.value}`);
 
     // 2. 提取这些卡牌的当前位置信息
     const positions = shuffleCandidates.map(node => ({
@@ -343,6 +360,8 @@ export function useGame(config: GameConfig): Game {
     floorList = []
     backCount.value = 0
     removeCount.value = 0
+    shuffleCount.value = 0           // 重置洗牌次数
+    shuffleFlag.value = false        // 重置洗牌按钮状态
 
     const isTrap = trap && floor(random(0, 100)) !== 50
 
@@ -477,7 +496,10 @@ export function useGame(config: GameConfig): Game {
     initData,
     backCount,
     removeCount,
+    shuffleCount,           // 导出洗牌次数计数器
     maxBackCount,
     maxRemoveCount,
+    maxShuffleCount,       // 导出最大洗牌次数
+    shuffleFlag,           // 导出洗牌按钮状态
   }
 }

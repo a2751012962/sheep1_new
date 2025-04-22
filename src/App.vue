@@ -34,6 +34,9 @@ const {
   removeCount,
   maxBackCount,
   maxRemoveCount,
+  maxShuffleCount,
+  shuffleCount,
+  shuffleFlag,
 } = useGame({
   container: containerRef,
   cardNum: 18,
@@ -164,9 +167,14 @@ onMounted(() => {
       <button :disabled="backFlag" mr-10px @click="handleBack">
         回退 ({{ maxBackCount - backCount }})
       </button>
-      <button @click="handleShuffle">
-        洗牌
-      </button>
+      <span
+        class="icon-btn"
+        :class="{ 'opacity-50': shuffleFlag }"
+        :title="`洗牌 (${maxShuffleCount - shuffleCount}次)`"
+        @click="handleShuffle"
+      >
+        <div i-carbon:shuffle />
+      </span>
     </div>
     <div w-full color="#000" fw-600 text-center pb-10px>
       <span mr-20px>designer: Teacher Face</span>
