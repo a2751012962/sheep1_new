@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import Card from './components/card.vue'
+import AIHelper from './components/AIHelper.vue'
 import { useGame } from './core/useGame'
 import { basicCannon, schoolPride } from './core/utils'
 
@@ -105,6 +106,10 @@ function handleLose() {
   }, 500)
 }
 
+function handleAIMove(node: CardNode) {
+  handleSelect(node)
+}
+
 onMounted(() => {
   initData()
 })
@@ -120,7 +125,7 @@ onMounted(() => {
         <template v-for="item in nodes" :key="item.id">
           <transition name="slide-fade">
             <Card
-              v-if="[0, 1].includes(item.state)"
+              v-if="!item.isRemoved"
               :node="item"
               @click-card="handleSelect"
             />
@@ -151,7 +156,7 @@ onMounted(() => {
         <template v-for="item in selectedNodes" :key="item.id">
           <transition name="bounce">
             <Card
-              v-if="item.state === 2"
+              v-if="item.isSelected"
               :node="item"
               is-dock
             />
@@ -160,16 +165,21 @@ onMounted(() => {
       </div>
     </div>
 
+    <AIHelper 
+      :nodes="nodes"
+      :onAIMove="handleAIMove"
+    />
+
     <div h-50px flex items-center w-full justify-center>
-      <button :disabled="removeFlag" mr-10px @click="handleRemove">
+      <button :disabled="!removeFlag" mr-10px @click="handleRemove">
         移出前三个 ({{ maxRemoveCount - removeCount }})
       </button>
-      <button :disabled="backFlag" mr-10px @click="handleBack">
+      <button :disabled="!backFlag" mr-10px @click="handleBack">
         回退 ({{ maxBackCount - backCount }})
       </button>
       <span
         class="icon-btn"
-        :class="{ 'opacity-50': shuffleFlag }"
+        :class="{ 'opacity-50': !shuffleFlag }"
         :title="`洗牌 (${maxShuffleCount - shuffleCount}次)`"
         @click="handleShuffle"
       >
